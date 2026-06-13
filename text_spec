@@ -1,0 +1,3 @@
+#1Can you edit kibi to include line suggegtions and completions 
+#2 Use the Azure_Open_AI framework to as LLM backbone - find credentials at ~/projects/email_graphs/.env
+#3 use python for api callbacks
