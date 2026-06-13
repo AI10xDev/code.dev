@@ -25,3 +25,5 @@ debug/
 release/
 *.log
 .DS_Store
+helix/
+helix-source/
