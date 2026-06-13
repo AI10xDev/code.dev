@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from openai import AzureOpenAI
 
 # Load credentials from ~/projects/email_graphs/.env
-load_dotenv("/home/emmanuel/.env")
+load_dotenv("/home/emmanuel/projects/email_graphs/.env")
 
 # Retrieve and clean up endpoint URL
 endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
@@ -27,7 +27,7 @@ def get_completion(context):
                 {
                     "role": "system",
                     "content": (
-                        "You are a code/text completion assistant. Your task is to output the characters/code "
+                        "You are a spec/text driven completion assistant. Your task is to output the characters/spec "
                         "that should immediately follow the provided prefix code, to complete the line and/or subsequent lines. "
                         "Do NOT repeat the prefix, do NOT wrap your answer in markdown code blocks (like ```), "
                         "and do NOT include any introductory or explanatory text. Your response will be appended "
@@ -35,7 +35,7 @@ def get_completion(context):
                         "Provide ONLY the completion content."
                     )
                 },
-                {"role": "user", "content": f"Prefix code:\n{context}\n\nProvide the completion for the code after the prefix."}
+                {"role": "user", "content": f"Prefix code:\n{context}\n\nProvide the completion for the spec after the prefix."}
             ]
         )
         text = response.choices[0].message.content
