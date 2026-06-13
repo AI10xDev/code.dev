@@ -1,0 +1,50 @@
+graph TD
+    subgraph Phase_1 [Phase 1: Research & Discovery]
+        P1_1[Analyze Directive] --> P1_2[Define Scope Boundary]
+        P1_2 --> P1_3[Map Architectural Context]
+        P1_3 --> P1_4{Validate Assumptions}
+        P1_4 -- Bug --> P1_4_B[Create Minimal Repro Case]
+        P1_4 -- Feature --> P1_4_F[Perform POC investigation]
+        P1_4_B --> P1_5[Identify Integration Points]
+        P1_4_F --> P1_5
+    end
+
+    Phase_1 --> Phase_2
+
+    subgraph Phase_2 [Phase 2: Strategy & Design]
+        P2_1[Propose Architecture] --> P2_2[Define Definition of Done]
+        P2_2 --> P2_3[Establish Verification Benchmarks]
+        P2_3 --> P2_4[Decompose Work into Atomic Sub-tasks]
+    end
+
+    Phase_2 --> Phase_3
+
+    subgraph Phase_3 [Phase 3: The Execution Loop]
+        P3_Start((Start Sub-task)) --> P3_1[Plan: State Intent]
+        P3_1 --> P3_2[Act: Surgical Update & Auto-format]
+        P3_2 --> P3_3[Validate: Test, Build, & Lint]
+        P3_3 --> P3_4{Validation Passed?}
+        
+        P3_4 -- No --> P3_R[Recover: Diagnose Failure]
+        P3_R -- Edit Issue --> P3_2
+        P3_R -- Logic Issue --> Phase_1
+        
+        P3_4 -- Yes --> P3_5[Refactor: Cleanup & Document]
+        P3_5 --> P3_End{More Sub-tasks?}
+        P3_End -- Yes --> P3_Start
+    end
+
+    Phase_3 -- No More Tasks --> Phase_4
+
+    subgraph Phase_4 [Phase 4: Finalization & Verification]
+        P4_1[Global Verification: Full Suite & Type-check] --> P4_2[Cleanup: Delete Repro/POC/Scratch files]
+        P4_2 --> P4_3[Final Sanity Check vs Original Intent]
+        P4_3 --> P4_4[Reporting: Summary & Risk Assessment]
+    end
+
+    P4_4 --> End((Ship))
+
+    style Phase_1 fill:#f9f,stroke:#333,stroke-width:2px
+    style Phase_2 fill:#bbf,stroke:#333,stroke-width:2px
+    style Phase_3 fill:#bfb,stroke:#333,stroke-width:2px
+    style Phase_4 fill:#fbb,stroke:#333,stroke-width:2px
