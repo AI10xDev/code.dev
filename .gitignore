@@ -1,0 +1,27 @@
+# Kibi
+kibi/debug
+kibi/target
+kibi/**/*.rs.bk
+kibi/release_files
+kibi/mutants.out
+kibi/.idea
+kibi/.vscode
+kibi/.zed
+
+# Credentials and Secrets
+.env
+.env.*
+*.secret
+*.key
+*.pem
+*.token
+credentials.json
+secrets.yml
+auth.json
+
+# Build and Temporary Files
+target/
+debug/
+release/
+*.log
+.DS_Store
