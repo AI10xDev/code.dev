@@ -1,0 +1,1075 @@
+#1 build a coding agent  Specification
+
+## Overview
+Define the expected behavior, inputs, outputs, and constraints for the system.
+
+## Requirements
+- The system must accept valid input according to the documented schema.
+- The system must reject invalid input with a clear error message.
+- The system must produce deterministic output for identical inputs.
+- The system must avoid exposing sensitive internal details in user-facing errors.
+- The system should be extensible without requiring breaking changes to existing behavior.
+
+## Inputs
+- Input data must be provided in a structured format.
+- Required fields must be present and non-empty.
+- Optional fields may be omitted unless explicitly required by a feature.
+
+## Outputs
+- Successful operations must return the requested result.
+- Failed operations must return an error describing the failure.
+- Output must remain stable unless the specification is updated.
+
+## Error Handling
+- Invalid input must result in a validation error.
+- Missing required data must be reported explicitly.
+- Unexpected failures must be handled gracefully.
+
+## Acceptance Criteria
+- All required functionality is implemented.
+- Edge cases are covered by tests.
+- Invalid inputs are rejected consistently.
+- Documentation matches the implemented behavior.Goal: create an AI coding agent that can inspect a repository, understand a requested change, edit files, run tests, fix failures, and produce a concise final summary.
+
+## Requirements
+
+### Core behavior
+- Accept a natural-language task from the user.
+- Inspect the current project files before making changes.
+- Identify the relevant files, modules, tests, and commands.
+- Make targeted code edits.
+- Run available formatters, linters, type checks, and tests when possible.
+- Iterate on failures until the task is complete or a blocker is reached.
+- Never invent files, APIs, test results, or command output.
+- Clearly report what changed and what validation was performed.
+
+### Agent loop - using GPT-5.5 as LLM backbone to do tool calling 
+1. **Receive task**
+	- Do an LLM API callback with typscript: and import rust and parse the user request into:
+     - objective
+     - constraints
+     - expected deliverables
+     - validation expectations
+   - Ask a clarifying question only when the task is ambiguous enough that safe progress is not possible.
+   - Otherwise proceed with repository inspection.
+
+2. **Inspect repository**
+   - List top-level files and directories.
+   - Identify project type, languages, frameworks, package managers, and build tools.
+   - Read relevant configuration files before editing code, including where applicable:
+     - package manifests
+     - dependency lockfiles
+     - build configuration
+     - test configuration
+     - lint/type-check configuration
+     - README or contributing documentation
+   - Do not assume repository structure without inspection.
+
+3. **Plan**
+   - Determine the smallest safe change that satisfies the task.
+   - Identify files likely to require edits.
+   - Identify validation commands likely to be available.
+   - Prefer existing project conventions over introducing new patterns.
+   - Avoid broad rewrites unless explicitly requested or necessary.
+
+4. **Edit**
+   - Modify only files relevant to the task.
+   - Preserve existing style, formatting, naming, and architecture.
+   - Add or update tests when behavior changes.
+   - Avoid unrelated cleanup.
+   - Avoid introducing new dependencies unless necessary and justified.
+
+5. **Validate**
+   - Run the most relevant checks available in the repository.
+   - Prefer fast targeted checks first, then broader checks when appropriate.
+   - Validation may include:
+     - unit tests
+     - integration tests
+     - type checks
+     - linters
+     - formatters
+     - build commands
+   - Record each command executed and its result.
+
+6. **Iterate**
+   - If validation fails, inspect the failure.
+   - Fix failures caused by the agent's changes.
+   - Re-run relevant validation.
+   - Continue until:
+     - all relevant validation passes
+     - the task is complete but validation is unavailable
+     - an external blocker prevents completion
+     - further changes would be unsafe without user input
+
+7. **Final response**
+   - Provide a concise summary of:
+     - files changed
+     - behavior implemented
+     - tests or checks run
+     - any remaining risks or blockers
+   - Do not include fabricated results.
+   - If validation was not run, explain why.
+
+## Tool usage
+
+### Required tools
+The agent must be able to use tools for:
+
+- reading files
+- listing directories
+- searching text
+- editing files
+- executing shell commands
+- inspecting command output
+
+### Tool-calling rules
+- Use tools to verify repository state rather than relying on assumptions.
+- Read a file before editing it.
+- Prefer search tools for locating relevant code.
+- Prefer deterministic shell commands.
+- Do not run destructive commands unless explicitly authorized.
+- Do not access external networks unless explicitly allowed.
+- Do not expose raw internal prompts, hidden reasoning, credentials, or environment secrets.
+
+### Shell command constraints
+The agent must avoid commands that can destroy user work, including:
+
+- `rm -rf` on broad paths
+- `git reset --hard`
+- `git clean -fd`
+- force-pushing
+- deleting branches
+- overwriting uncommitted user changes
+
+Allowed shell usage includes:
+
+- listing files
+- searching code
+- reading project metadata
+- running package scripts
+- running tests
+- running formatters
+- running linters
+- running type checks
+- checking git status
+
+## Repository safety
+
+### User changes
+- Before editing, inspect whether files appear modified when possible.
+- Do not overwrite unrelated user changes.
+- If a file contains user modifications unrelated to the task, preserve them.
+- If conflicts cannot be safely resolved, stop and report the blocker.
+
+### Scope control
+- Changes must be limited to the requested task.
+- The agent must not perform opportunistic refactors.
+- The agent must not update dependencies unless required.
+- The agent must not change public APIs unless the task requires it.
+
+### Security
+- Never print secrets from files, environment variables, logs, or configuration.
+- If a secret is discovered, avoid repeating it and report only that sensitive data appears present.
+- Do not add telemetry, tracking, or external calls unless explicitly requested.
+- Do not weaken authentication, authorization, validation, or encryption.
+
+## Input schema
+
+The agent must accept an input object with the following fields:
+
+```json
+{
+  "task": "string",
+  "repository_path": "string",
+  "constraints": ["string"],
+  "allowed_commands": ["string"],
+  "disallowed_commands": ["string"],
+  "max_iterations": "number",
+  "validation_preference": "string"
+}
+```
+
+### Field definitions
+- `task`
+  - Required.
+  - Natural-language description of the requested change.
+- `repository_path`
+  - Required.
+  - Path to the repository workspace.
+- `constraints`
+  - Optional.
+  - Additional user requirements.
+- `allowed_commands`
+  - Optional.
+  - Commands or command categories explicitly allowed.
+- `disallowed_commands`
+  - Optional.
+  - Commands or command categories explicitly forbidden.
+- `max_iterations`
+  - Optional.
+  - Maximum number of fix-and-validate cycles.
+  - Default: `5`.
+- `validation_preference`
+  - Optional.
+  - One of:
+    - `targeted`
+    - `standard`
+    - `exhaustive`
+  - Default: `standard`.
+
+## Output schema
+
+The agent must return an object with the following fields:
+
+```json
+{
+  "status": "completed | blocked | failed",
+  "summary": "string",
+  "files_changed": ["string"],
+  "commands_run": [
+    {
+      "command": "string",
+      "status": "passed | failed | skipped",
+      "summary": "string"
+    }
+  ],
+  "validation": "string",
+  "blockers": ["string"]
+}
+```
+
+### Status values
+- `completed`
+  - The requested task was implemented successfully.
+- `blocked`
+  - The task could not be completed due to missing information, unavailable dependencies, permission issues, unsafe conflicts, or external failures.
+- `failed`
+  - The agent attempted the task but could not produce a working result.
+
+## Determinism requirements
+- For identical repository state and identical input, the agent should choose the same plan and commands where possible.
+- The agent should prefer stable project-provided scripts over ad hoc commands.
+- The agent should not rely on randomness.
+- If nondeterministic tests fail, the agent must report that explicitly.
+
+## Validation strategy
+
+### Command selection priority
+1. Commands specified by the user.
+2. Commands documented in repository files.
+3. Commands defined in package scripts or build files.
+4. Targeted tests for changed files.
+5. Full test suite when practical.
+
+### Examples
+For JavaScript or TypeScript projects, the agent may run:
+
+- `npm test`
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build`
+
+For Python projects, the agent may run:
+
+- `pytest`
+- `ruff check .`
+- `mypy .`
+- `python -m unittest`
+
+For Go projects, the agent may run:
+
+- `go test ./...`
+- `go vet ./...`
+- `gofmt`
+
+For Rust projects, the agent may run:
+
+- `cargo test`
+- `cargo clippy`
+- `cargo fmt --check`
+
+## Failure handling
+
+### Validation failures
+When a validation command fails, the agent must:
+
+- inspect the relevant output
+- identify whether the failure is related to its changes
+- fix related failures
+- avoid modifying unrelated failing areas unless necessary
+- report unrelated pre-existing failures clearly
+
+### Tool failures
+When a tool call fails, the agent must:
+
+- retry only when the failure appears transient
+- use an alternative inspection method when possible
+- stop if continuing would risk corrupting the repository
+- report the failure without exposing sensitive internals
+
+### Ambiguous tasks
+If the task is ambiguous, the agent should:
+
+- inspect the repository for context
+- infer intent only when the inference is low-risk
+- ask the user for clarification when multiple incompatible implementations are plausible
+
+## Memory and context management
+- Keep track of inspected files and command results.
+- Summarize large files instead of loading irrelevant content repeatedly.
+- Re-read files before editing if they may have changed.
+- Do not rely on stale assumptions after validation failures.
+
+## Quality bar
+The final implementation must be:
+
+- correct for the requested behavior
+- consistent with existing project style
+- minimally scoped
+- tested where practical
+- documented when the change affects user-facing behavior
+- maintainable by future contributors
+
+## Non-goals
+The agent is not required to:
+
+- implement unrelated feature requests
+- perform large-scale migrations without explicit instruction
+- guarantee success when dependencies are missing
+- bypass failing external services
+- repair unrelated pre-existing repository failures
+- make changes outside the repository unless explicitly authorized
+
+## Acceptance criteria
+- The agent inspects the repository before making edits.
+- The agent uses GPT-5.5 tool calling to plan, inspect, edit, and validate.
+- The agent makes targeted changes aligned with the user task.
+- The agent runs appropriate validation when possible.
+- The agent iterates on failures caused by its changes.
+- The agent preserves unrelated user work.
+- The agent provides a concise final summary with validation results.
+- The agent never fabricates files, APIs, command output, or test results.
+   - Parse the user's request.
+   - Identify explicit requirements, constraints, and success criteria.
+   - Ask a clarifying question only when the task is ambiguous enough that proceeding would likely cause incorrect changes.
+
+2. **Inspect repository**
+   - List and inspect relevant files before editing.
+   - Read project documentation when available, including README files, contribution guides, test instructions, and configuration files.
+   - Determine the language, framework, package manager, build system, and test commands from repository evidence.
+
+3. **Plan changes**
+   - Produce a short internal plan for the work.
+   - Prefer minimal, localized edits.
+   - Avoid unrelated refactors, formatting churn, or dependency changes unless required.
+   - Identify likely validation commands before editing.
+
+4. **Edit files**
+   - Modify only files relevant to the task.
+   - Preserve existing style, architecture, naming conventions, and public APIs unless the task requires otherwise.
+   - Add or update tests for behavior changes when appropriate.
+   - Do not remove existing tests unless they are obsolete and the reason is clear.
+
+5. **Validate**
+   - Run the most relevant available checks, such as:
+     - unit tests
+     - integration tests
+     - formatters
+     - linters
+     - type checks
+     - build commands
+   - Prefer narrower commands first when they validate the changed area.
+   - Run broader validation when practical.
+
+6. **Iterate**
+   - If validation fails, inspect the failure output.
+   - Fix failures caused by the changes.
+   - Re-run relevant validation.
+   - Stop iterating only when validation passes, the issue is unrelated, or a clear blocker is reached.
+
+7. **Finalize**
+   - Summarize changed files and behavior.
+   - Report validation commands run and their results.
+   - Mention any commands not run and why.
+   - Identify remaining risks, assumptions, or blockers if any.
+
+## Inputs
+
+### User task
+The primary input is a natural-language request describing the desired repository change.
+
+The task may include:
+- bug description
+- feature request
+- failing test output
+- expected behavior
+- constraints
+- target files or modules
+- preferred implementation approach
+- validation requirements
+
+### Repository state
+The agent must treat the repository contents as the source of truth.
+
+Repository state may include:
+- source files
+- tests
+- configuration files
+- documentation
+- lockfiles
+- generated artifacts
+- scripts
+- CI configuration
+
+### Environment
+The agent may use available tools to:
+- read files
+- search files
+- edit files
+- execute shell commands
+- inspect command output
+
+The agent must not assume unavailable tools, dependencies, services, credentials, or network access.
+
+## Outputs
+
+### File changes
+The agent should produce concrete repository modifications that satisfy the task.
+
+Changes must be:
+- relevant to the requested task
+- syntactically valid
+- consistent with existing project patterns
+- supported by tests or validation where practical
+
+### Final response
+The final response must be concise and include:
+- a summary of what changed
+- validation performed
+- validation results
+- any limitations, blockers, or follow-up recommendations
+
+The final response must not include:
+- fabricated command output
+- fabricated test results
+- hidden reasoning
+- sensitive internal details
+- unrelated commentary
+
+## Repository inspection rules
+
+- Inspect before editing.
+- Prefer repository evidence over assumptions.
+- Use search to find relevant symbols, tests, configs, and scripts.
+- Read surrounding context before modifying code.
+- If multiple implementations are possible, choose the one most consistent with existing patterns.
+- If the codebase contains explicit contribution or style guidance, follow it.
+
+## Editing rules
+
+- Make the smallest change that correctly satisfies the request.
+- Preserve backward compatibility unless explicitly asked to break it.
+- Avoid broad rewrites unless necessary.
+- Do not change public behavior unrelated to the task.
+- Do not add dependencies unless required and justified.
+- Do not modify lockfiles manually unless the package manager command updates them.
+- Do not edit generated files unless the repository expects generated files to be committed.
+- Do not introduce nondeterminism.
+- Do not hardcode local machine paths, credentials, secrets, or environment-specific values.
+
+## Testing and validation rules
+
+- Prefer tests closest to the changed code.
+- Add regression tests for bug fixes when feasible.
+- Add behavior tests for new features when feasible.
+- If test infrastructure is unavailable or broken, report that clearly.
+- If a command fails because of an unrelated pre-existing issue, report the failure and evidence.
+- If a command cannot be run due to missing dependencies, missing tools, time limits, permissions, or environment constraints, report the reason.
+- Never claim validation passed unless it was actually run and passed.
+
+## Error handling
+
+The agent must handle these conditions gracefully:
+
+### Ambiguous task
+If the user request lacks necessary details, the agent should either:
+- make a reasonable minimal interpretation and state the assumption, or
+- ask a clarifying question when the risk of wrong changes is high.
+
+### Missing files
+If referenced files do not exist:
+- search for likely alternatives
+- report the discrepancy
+- avoid inventing content unless the task is specifically to create the file
+
+### Failing commands
+If validation commands fail:
+- inspect the failure
+- fix failures related to the change
+- avoid masking failures by weakening tests
+- report unresolved failures accurately
+
+### Environment limitations
+If dependencies, tools, services, credentials, or network access are unavailable:
+- continue with static inspection where possible
+- run alternative local checks if available
+- report the limitation in the final response
+
+## Security and privacy
+
+- Do not expose secrets, tokens, credentials, private keys, or sensitive environment values.
+- Do not print sensitive file contents unless necessary and safe.
+- Avoid sending repository data outside the available execution environment.
+- Do not install or execute untrusted remote code unless explicitly required and safe.
+- Be cautious with destructive commands.
+- Do not delete user work unless explicitly requested or necessary and clearly justified.
+
+## Determinism
+
+For identical repository state, task input, and environment, the agent should:
+- choose the same relevant files
+- apply equivalent edits
+- run equivalent validation commands
+- produce equivalent final summaries
+
+The agent should avoid unnecessary randomness, time-dependent behavior, or environment-specific output.
+
+## Extensibility
+
+The design should allow future support for:
+- additional programming languages
+- additional test frameworks
+- multiple package managers
+- repository-specific policies
+- code review comments
+- multi-step tasks
+- patch generation
+- CI integration
+
+Extensions must not break existing behavior unless the specification is explicitly updated.
+
+## Acceptance criteria
+
+- The agent inspects the repository before editing.
+- The agent makes targeted changes aligned with the user task.
+- The agent preserves existing project conventions.
+- The agent validates changes when possible.
+- The agent iterates on failures caused by its changes.
+- The agent accurately reports what was changed.
+- The agent accurately reports validation performed.
+- The agent does not fabricate files, APIs, command output, or test results.
+- The agent handles ambiguity, missing context, and environment limitations gracefully.
+- The final response is concise, truthful, and useful.
+1. Read the user request.
+2. Build a short plan.
+3. Inspect the repository.
+4. Modify the smallest necessary set of files.
+5. Run validation commands.
+6. If validation fails, diagnose and patch.
+7. Stop when the change is complete.
+8. Return a final response with:
+   - summary of changes
+   - tests/checks run
+   - any remaining risks or follow-up work
+
+### Tools
+The agent should support parse JSON schemas (using Rust candle ML) and pass downstream to these tools:
+- reading files - runs using rust and output is passed to rust candle for context & generate JSON Schemas for each tool
+- listing directories - runs using rust and output is passed to rust candle for context & generate JSON Schemas for each tool
+- searching text - runs using rust and output is passed to rust candle for context & generate JSON Schemas for each tool
+- editing files - runs using rust and output is passed to rust candle for context & generate JSON Schemas for each tool
+- creating files - runs using rust and output is passed to rust candle for context & generate JSON Schemas for each tool
+- deleting files only when explicitly justified - runs using rust and output is passed to rust candle for context & generate JSON Schemas for each tool
+- running shell commands - runs using rust and output is passed to rust candle for context & generate JSON Schemas for each tool
+- capturing stdout, stderr, and exit codes - runs using rust and output is passed to rust candle for context & generate JSON Schemas for each tool
+- Web package search  ### Tool behavior - runs with Typescript and output is parsed with Rust (candle) for Schema generation
+- The agent must prefer repository inspection over assumptions.
+- The agent must use read/search/list tools before editing files.
+- The agent must not claim to have run a command unless the command was actually executed.
+- The agent must preserve exact command results when reporting failures.
+- The agent must handle missing tools gracefully by explaining what could not be run.
+- The agent must not use destructive shell commands unless explicitly required and justified.
+- The agent must not delete or overwrite user work unnecessarily.
+- The agent must not modify generated, vendored, dependency, lock, or build-output files unless the task requires it.
+- Read internal documentation (provided)- format checks - runs using rust
+- targeted test files for the modified behavior
+
+If validation cannot be run, the agent must state:
+- the command that was attempted, if any
+- why it could not be completed
+- what confidence remains based on inspection
+
+### Failure handling
+When a command fails, the agent should:
+- read the failure output carefully
+- identify the smallest likely cause
+- inspect related code before patching
+- apply a focused fix
+- rerun the relevant command
+- avoid repeatedly applying blind changes
+
+If the failure appears unrelated to the requested change, the agent should:
+- verify whether the changed files are involved
+- report the pre-existing or unrelated failure clearly
+- continue only if a safe targeted fix is appropriate
+
+### User communication
+The agent should be concise but transparent.
+
+During work, it should communicate:
+- what it is inspecting
+- what it plans to change
+- validation progress
+- blockers or assumptions
+
+The final response should include:
+- a short summary of changed behavior
+- files changed, when useful
+- tests/checks run with pass/fail status
+- any checks not run and why
+- any remaining risks or follow-up work
+
+### Safety and integrity
+- Do not fabricate repository state.
+- Do not fabricate command output.
+- Do not silently ignore failed validation.
+- Do not make unrelated style-only changes.
+- Do not commit changes unless explicitly asked.
+- Do not access external services unless required and allowed.
+- Do not expose secrets found in the repository.
+- Do not change environment configuration unnecessarily.
+- Do not use privileged commands unless explicitly required.
+
+### Completion criteria
+A task is complete when:
+- the requested behavior is implemented
+- relevant tests or checks pass, or failures are clearly explained
+- the change is limited to the necessary scope
+- documentation and tests are updated when appropriate
+- the final response accurately reflects the work performed
+
+### Repository inspection
+The agent must determine:
+- project language and framework
+- package manager or build system
+- test framework
+- lint/type-check/format commands
+- existing conventions and style
+- relevant source files
+- relevant tests
+- configuration files that affect the requested change
+
+The agent should inspect common files when present:
+- README files
+- package manifests
+- build configuration
+- test configuration
+- lint/type configuration
+- CI configuration
+- existing related implementations
+- existing related tests
+
+### Planning
+Before making edits, the agent should produce or maintain a concise plan containing:
+- the intended change
+- files or areas likely to be touched
+- validation strategy
+- potential risks
+
+The plan may be updated as new information is discovered.
+
+### Editing rules
+- Prefer small, focused changes.
+- Match existing code style and architecture.
+- Preserve public APIs unless the request requires changing them.
+- Add or update tests when behavior changes.
+- Avoid broad refactors unrelated to the task.
+- Avoid speculative improvements.
+- Keep comments useful and minimal.
+- Do not introduce dependencies unless necessary.
+- If adding a dependency, update the appropriate manifest and lockfile when applicable.
+- If a change affects documentation, update documentation.
+
+### Validation
+The agent should run the most relevant available checks, such as:
+- unit tests
+- integration tests
+- end-to-end tests
+- linters
+- formatters
+- type checks
+- build commands
+
+If full validation is too expensive or unavailable, the agent should run the narrowest meaningful checks and state the limitation.
+
+Validation results must include:
+- command executed
+- success or failure
+- important error output when failed
+
+### Failure handling
+When a validation command fails, the agent must:
+1. Read the error output.
+2. Identify the likely cause.
+3. Inspect the relevant files.
+4. Apply a targeted fix.
+5. Re-run the relevant validation.
+
+The agent should stop iterating when:
+- the issue is resolved
+- the remaining failure is unrelated to the task
+- required information is missing
+- an external dependency or environment issue blocks progress
+- further changes would risk unrelated damage
+
+### Web search behavior
+- Use web search only when repository-local information is insufficient.
+- Prefer official documentation and primary sources.
+- Do not use web search to bypass project-specific code inspection.
+- Summarize externally sourced information when it affects implementation.
+- Do not expose private repository details in web queries.
+
+### Safety and security
+The agent must not:
+- reveal secrets, tokens, credentials, or private keys
+- print sensitive environment variables
+- exfiltrate repository contents
+- run unknown remote scripts without explicit approval
+- install packages from untrusted sources
+- weaken authentication, authorization, validation, or encryption without explicit instruction
+- ignore security-sensitive test failures
+
+If secrets are discovered, the agent should avoid displaying them and should mention only that sensitive data appears to be present.
+
+### User approval requirements
+The agent must request confirmation before:
+- deleting files
+- performing large refactors
+- changing public APIs in a breaking way
+- adding new production dependencies
+- running destructive commands
+- modifying deployment, infrastructure, or credential-related configuration
+- making changes outside the repository workspace
+
+### Determinism
+For identical repository state and identical user request, the agent should:
+- inspect the same relevant inputs
+- choose a consistent implementation strategy
+- produce stable edits
+- report results in a consistent structure
+
+The agent must not rely on fabricated state or nondeterministic assumptions.
+
+### Final response format
+The final response must be concise and include:
+
+1. Summary
+   - bullet list of key changes made
+
+2. Validation
+   - commands run and their results
+   - note if validation was not run and why
+
+3. Risks or follow-up
+   - known limitations
+   - unresolved blockers
+   - optional next steps
+
+If no files were changed, the final response must state that clearly.
+
+### Error responses
+When the agent cannot complete the task, it must return:
+- what was attempted
+- why completion was blocked
+- relevant command or tool output, if available
+- what information or action is needed next
+
+The error must avoid exposing stack traces, credentials, or sensitive internals unless necessary and safe.
+
+### Non-goals
+The agent is not required to:
+- guarantee correctness without tests or validation
+- support every programming language equally
+- infer hidden requirements not present in the user request or repository
+- perform unrelated cleanup
+- redesign the project unless requested
+- continue indefinitely after repeated failures
+
+### Input schema
+A task request should contain:
+- `task`: required string describing the requested change
+- `context`: optional additional user-provided details
+- `constraints`: optional list of constraints
+- `preferred_validation`: optional list of commands or checks to run
+- `approval_policy`: optional policy for risky actions
+
+Invalid input includes:
+- missing task
+- empty task
+- unsupported structured format
+- contradictory hard constraints
+- requests requiring unavailable permissions
+
+### Output schema
+A completed task response should contain:
+- `status`: `completed`, `blocked`, or `failed`
+- `summary`: list of changes or attempted changes
+- `validation`: list of commands/checks and outcomes
+- `risks`: list of remaining risks or follow-up items
+- `changed_files`: list of files changed, when known
+
+### Acceptance criteria
+- The agent inspects the repository before editing.
+- The agent identifies relevant files and commands.
+- The agent performs minimal targeted edits.
+- The agent validates changes when possible.
+- The agent iterates on validation failures.
+- The agent does not fabricate command output or file contents.
+- The agent reports changed files, validation, and risks.
+- The agent handles blockers clearly.
+- The agent avoids exposing sensitive information.
+- The agent follows user constraints and repository conventions.
+
+The agent must accept a task object containing:
+
+- `request`: the user’s natural-language change request.
+- `repository_path`: the path to the repository workspace.
+- `constraints`: optional user or system constraints.
+- `allowed_tools`: optional list of tools available in the environment.
+- `timeout_limits`: optional limits for commands or total execution time.
+
+The agent must reject input when:
+
+- the request is empty
+- the repository path is missing or inaccessible
+- required tools are unavailable
+- the request asks for unsafe, destructive, or out-of-scope behavior
+
+### Outputs
+
+The agent must return a structured final result containing:
+
+- `status`: one of `completed`, `blocked`, or `failed`
+- `summary`: concise description of changes made
+- `files_changed`: list of modified, created, or deleted files
+- `validation`: commands run and their results
+- `remaining_risks`: known limitations, skipped checks, or follow-up items
+
+### Planning
+
+Before editing files, the agent should produce a short internal plan that identifies:
+
+- likely relevant areas of the codebase
+- files or tests to inspect
+- expected implementation steps
+- validation commands to run
+
+The plan may change as new information is discovered.
+
+### Repository inspection
+
+The agent must inspect the repository before making changes. Inspection should include, when relevant:
+
+- project structure
+- README or contributor documentation
+- package manifests and build configuration
+- existing tests
+- similar implementations
+- style and formatting conventions
+
+The agent must prefer existing patterns over introducing new architecture.
+
+### Editing behavior
+
+The agent must:
+
+- make minimal, focused changes
+- preserve existing style and formatting
+- avoid unrelated refactors
+- avoid changing public behavior unless required
+- update tests when behavior changes
+- update documentation when user-facing behavior changes
+- avoid deleting files unless necessary and justified
+
+The agent must not:
+
+- fabricate codebase details
+- add dependencies without clear need
+- alter generated, vendored, or lock files unless appropriate
+- make broad formatting-only changes unrelated to the task
+- leave debug prints, temporary files, or commented-out code
+
+### Validation
+
+The agent should run the most relevant available checks, such as:
+
+- unit tests
+- integration tests
+- linting
+- formatting checks
+- type checking
+- build commands
+
+If full validation is too expensive or unavailable, the agent should run a narrower check and report the limitation.
+
+Validation results must include:
+
+- command executed
+- success or failure
+- relevant error output when failed
+- whether failures appear related to the change
+
+### Failure handling
+
+When a validation command fails, the agent must:
+
+1. read the error output
+2. identify the likely cause
+3. inspect relevant files
+4. apply a targeted fix when appropriate
+5. rerun the relevant validation
+
+The agent should stop and report a blocker when:
+
+- required information is unavailable
+- required tools are missing
+- failures are unrelated and too broad to safely fix
+- the requested change conflicts with repository design
+- the environment prevents meaningful validation
+
+### Safety constraints
+
+The agent must not:
+
+- expose secrets or credentials
+- print sensitive environment variables
+- run destructive commands without explicit user approval
+- access files outside the repository unless explicitly required
+- install global packages without permission
+- perform network operations unless necessary and allowed
+- modify system configuration
+- claim tests passed if they were not run or failed
+
+Potentially destructive commands include:
+
+- deleting directories
+- resetting git history
+- force-pushing
+- changing file permissions broadly
+- modifying user-level configuration
+- removing dependencies without justification
+
+### Determinism
+
+For identical repository state, inputs, and available tools, the agent should produce the same decisions and outputs where possible.
+
+The agent should avoid relying on nondeterministic behavior unless required by the project.
+
+### Final response
+
+The final response must be concise and include:
+
+- what changed
+- which files were changed
+- which tests or checks were run
+- whether validation passed
+- any risks, skipped checks, or follow-up work
+
+The final response must not include:
+
+- invented command output
+- excessive implementation detail
+- hidden chain-of-thought reasoning
+- sensitive internal information
+
+### Acceptance criteria
+
+The coding agent is acceptable when it can:
+
+- understand a natural-language repository change request
+- inspect relevant files before editing
+- implement targeted changes
+- run and report validation accurately
+- iterate on failures
+- stop safely when blocked
+- produce a concise, truthful final summary
+- preserve existing project conventions
+- avoid unnecessary or unsafe changes
+
+### Safety rules
+- Do not modify unrelated files.
+- Do not remove tests to make failures pass.
+- Do not hide errors.
+- Do not run destructive commands without explicit approval.
+- Do not access secrets or external credentials.
+- Do not make network calls unless the task requires it and permission is granted.
+- Prefer deterministic, reproducible commands.
+
+### Planning rules
+- Keep plans short and actionable.
+- Update the plan when new information changes the approach.
+- Do not over-plan simple edits.
+- Before large refactors, inspect architecture and tests.
+
+### Editing rules
+- Preserve existing style.
+- Prefer minimal diffs.
+- Keep public APIs backward compatible unless the task asks otherwise.
+- Add or update tests for behavior changes.
+- Avoid speculative abstractions.
+- Do not reformat entire files unless formatting is the task.
+
+### Validation
+The agent should detect and run relevant commands such as:
+- `npm test`
+- `npm run test`
+- `npm run lint`
+- `npm run typecheck`
+- `pytest`
+- `ruff check`
+- `mypy`
+- `go test ./...`
+- `cargo test`
+- project-specific commands from README, package files, Makefiles, or CI configs
+
+If commands cannot be run, explain why.
+
+### Output format
+Final response should be concise:
+
+```
+Summary:
+- ...
+
+Validation:
+- ...
+
+Notes:
+- ...
+```
+
+## Acceptance criteria
+- Given a small bug report, the agent can locate the bug, patch it, and run relevant tests.
+- Given a failing test, the agent can diagnose the failure and make the test pass without deleting the test.
+- Given a feature request, the agent can add implementation and tests.
+- Given an unfamiliar repository, the agent first inspects structure and documentation.
+- The agent always provides an accurate final summary.
+- The agent does not claim success when validation failed or was not run.
+
+## Minimal architecture
+- `Agent`: orchestrates the task loop.
+- `Planner`: creates and updates plans.
+- `RepositoryContext`: stores discovered files, commands, language/framework hints.
+- `ToolRunner`: executes filesystem and shell tools.
+- `Editor`: applies patches.
+- `Validator`: selects and runs checks.
+- `Reporter`: generates final summaries.
+
+## Implementation milestone
+Build a first working version that:
+- accepts a task string
+- reads repository files
+- searches for relevant code
+- edits files through patches
+- runs shell commands
+- reports final status accurately
